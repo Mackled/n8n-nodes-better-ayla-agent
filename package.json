@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-better-ayla-agent",
-  "version": "1.7.2",
+  "version": "1.7.5",
   "description": "An improved Ayla Agent node for n8n with improved memory management and modern AI SDK integration",
   "main": "dist/BetterAiAgent.node.js",
   "scripts": {
