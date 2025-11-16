@@ -488,7 +488,7 @@ function getInputs(): Array<NodeConnectionType | INodeInputConfiguration> {
 
 export class BetterAiAgent implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Better AI Agent',
+		displayName: 'Better Ayla Agent',
 		name: 'betterAiAgent',
 		icon: 'fa:robot',
 		iconColor: 'black',
@@ -496,7 +496,7 @@ export class BetterAiAgent implements INodeType {
 		version: 16,
 		description: 'Advanced AI Agent with improved memory management and modern AI SDK (OpenAI Message Format)',
 		defaults: {
-			name: 'Better AI Agent',
+			name: 'Better Ayla Agent',
 			color: '#1f77b4',
 		},
 		inputs: getInputs(),

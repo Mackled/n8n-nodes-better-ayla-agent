@@ -1,4 +1,4 @@
-# Better AI Agent for n8n
+# Better Ayla Agent for n8n
 
 An improved AI Agent node for n8n that provides better memory management, modern AI SDK integration and a webhook option to push intermediate messages as they happen.
 
@@ -11,7 +11,7 @@ An improved AI Agent node for n8n that provides better memory management, modern
 ## Installation
 
 ```bash
-npm install n8n-nodes-better-ai-agent
+npm install n8n-nodes-better-ayla-agent
 ```
 
 ## Compatibility
@@ -38,13 +38,18 @@ This node is designed to be a drop-in replacement for the existing AI Agent node
 - **Problem**: Complex agent type selection with lots of conditional logic
 - **Solution**: Single, powerful agent that adapts to your needs
 
+### 4. Two-Stage Generation with Utility Model (Cost Optimization)
+- **Problem**: Powerful AI models can be expensive for every intermediate step, especially with frequent tool calls.
+- **Solution**: This node now supports an optional "Utility Model" for cost-effective operations. When connected, a cheaper, faster utility model handles all intermediate reasoning steps, tool calls, and tool result processing. The more powerful "Main Model" is then exclusively used for generating the final, high-quality, user-facing response, significantly reducing overall token costs while maintaining response quality.
+
 ## Usage
 
 ### Basic Setup
 
 1. **Add the node** to your workflow
-2. **Connect a Language Model** (OpenAI, Anthropic, etc.)
-3. **Optionally connect**:
+2. **Connect a Language Model** (OpenAI, Anthropic, etc.) as the **Main Model**.
+3. **Optionally connect a second Language Model** as the **Utility Model** for cost-optimized two-stage generation.
+4. **Optionally connect**:
    - Memory node for conversation persistence
    - Tool nodes for enhanced capabilities
    - Output Parser for structured responses
@@ -68,7 +73,7 @@ Choose how to provide the user prompt:
 ### Example Workflow
 
 ```
-Chat Trigger → Better AI Agent → Response
+Chat Trigger → Better Ayla Agent → Response
               ↗ OpenAI Model
               ↗ Buffer Memory
               ↗ Calculator Tool
@@ -108,7 +113,7 @@ Uses modern patterns from Vercel AI SDK:
 | n8n UI does not highlight the attached model or tool nodes because only the Agent executes code | Rely on the Agent output or streamed webhook messages for visibility |
 | Tool nodes without an explicit Zod/JSON schema (e.g. raw HTTP Request) may receive incorrect argument keys | Wrap such tools in a **Custom Code Tool** and define a schema, or add few-shot examples |
 | Streaming is step-level, not token-level; the n8n node outputs only when the Agent finishes | Use the Intermediate Webhook to push interim messages to a Chat, Slack, etc. |
-| The node's dependencies must be available next to `~/.n8n/custom/BetterAiAgent.node.js` | Run `npm run deploy-local` (copies `package.json` and installs runtime deps) |
+| The node's dependencies must be available next to `~/.n8n/custom/BetterAylaAgent.node.js` | Run `npm run deploy-local` (copies `package.json` and installs runtime deps) |
 
 ## Development
 
@@ -116,7 +121,7 @@ Uses modern patterns from Vercel AI SDK:
 
 ```bash
 git clone <repository>
-cd better-ai-agent
+cd n8n-nodes-better-ayla-agent
 npm install
 npm run build
 ```
@@ -163,4 +168,4 @@ MIT License - see LICENSE file for details.
 
 - Create an issue for bugs or feature requests
 - Join the n8n community for general support
-- Check the documentation for detailed usage examples 
+- Check the documentation for detailed usage examples

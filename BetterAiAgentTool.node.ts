@@ -474,7 +474,7 @@ function getInputs(): Array<NodeConnectionType | INodeInputConfiguration> {
 
 export class BetterAiAgentTool implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Better AI Agent Tool',
+		displayName: 'Better Ayla Agent Tool',
 		name: 'betterAiAgentTool',
 		icon: 'fa:robot',
 		iconColor: 'black',
@@ -482,7 +482,7 @@ export class BetterAiAgentTool implements INodeType {
 		version: 1,
 		description: 'Advanced AI Agent with improved memory management and modern AI SDK - usable as Tool',
 		defaults: {
-			name: 'Better AI Agent Tool',
+			name: 'Better Ayla Agent Tool',
 			color: '#1f77b4',
 		},
 		usableAsTool: true,
