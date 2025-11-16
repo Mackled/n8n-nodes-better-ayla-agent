@@ -57,10 +57,14 @@ export async function getConnectedMemory(ctx: IExecuteFunctions): Promise<any> {
 }
 
 /**
- * Get connected language model
+ * Get all connected language models
  */
-export async function getConnectedModel(ctx: IExecuteFunctions): Promise<any> {
-	return await ctx.getInputConnectionData(NodeConnectionTypes.AiLanguageModel, 0);
+export async function getConnectedModels(ctx: IExecuteFunctions): Promise<any[]> {
+	const models = await ctx.getInputConnectionData(NodeConnectionTypes.AiLanguageModel, 0);
+	if (!models) {
+		return [];
+	}
+	return Array.isArray(models) ? models : [models];
 }
 
 /**

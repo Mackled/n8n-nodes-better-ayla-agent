@@ -20,7 +20,7 @@ import {
 	getPromptInputByType,
 	getConnectedTools,
 	getConnectedMemory,
-	getConnectedModel,
+	getConnectedModels,
 	promptTypeOptions,
 	textInput,
 	textFromPreviousNode,
@@ -405,6 +405,7 @@ function getInputs(): Array<NodeConnectionType | INodeInputConfiguration> {
 		type: NodeConnectionType;
 		filter?: INodeInputFilter;
 		required?: boolean;
+		displayName?: string; // Allow custom display name
 	}
 
 	const getInputData = (
@@ -413,20 +414,20 @@ function getInputs(): Array<NodeConnectionType | INodeInputConfiguration> {
 		const displayNames: { [key: string]: string } = {
 			[NodeConnectionTypes.AiLanguageModel]: 'Chat Model',
 			[NodeConnectionTypes.AiMemory]: 'Memory',
-			[NodeConnectionTypes.AiTool]: 'Tool', 
+			[NodeConnectionTypes.AiTool]: 'Tool',
 			[NodeConnectionTypes.AiOutputParser]: 'Output Parser',
 		};
 
-		return inputs.map(({ type, filter, required }) => {
+		return inputs.map(({ type, filter, required, displayName }) => {
 			const input: INodeInputConfiguration = {
 				type,
-				displayName: displayNames[type] || type,
-				required: required || type === NodeConnectionTypes.AiLanguageModel,
-				maxConnections: [NodeConnectionTypes.AiLanguageModel, NodeConnectionTypes.AiMemory, NodeConnectionTypes.AiOutputParser].includes(
-					type as any,
-				)
-					? 1
-					: undefined,
+				displayName: displayName || displayNames[type] || type,
+				required: required,
+				// Allow multiple model connections, but only one for others
+				maxConnections:
+					type === NodeConnectionTypes.AiMemory || type === NodeConnectionTypes.AiOutputParser
+						? 1
+						: undefined,
 			};
 
 			if (filter) {
@@ -437,36 +438,48 @@ function getInputs(): Array<NodeConnectionType | INodeInputConfiguration> {
 		});
 	};
 
+	const modelFilter = {
+		nodes: [
+			'@n8n/n8n-nodes-langchain.lmChatAnthropic',
+			'@n8n/n8n-nodes-langchain.lmChatAzureOpenAi',
+			'@n8n/n8n-nodes-langchain.lmChatAwsBedrock',
+			'@n8n/n8n-nodes-langchain.lmChatMistralCloud',
+			'@n8n/n8n-nodes-langchain.lmChatOllama',
+			'@n8n/n8n-nodes-langchain.lmChatOpenAi',
+			'@n8n/n8n-nodes-langchain.lmChatGroq',
+			'@n8n/n8n-nodes-langchain.lmChatGoogleVertex',
+			'@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
+			'@n8n/n8n-nodes-langchain.lmChatDeepSeek',
+			'@n8n/n8n-nodes-langchain.lmChatOpenRouter',
+			'@n8n/n8n-nodes-langchain.lmChatXAiGrok',
+			'@n8n/n8n-nodes-langchain.code',
+		],
+	};
+
 	const specialInputs: SpecialInput[] = [
 		{
 			type: NodeConnectionTypes.AiLanguageModel,
+			displayName: 'Chat Model (Main)',
 			required: true,
-			filter: {
-				nodes: [
-					'@n8n/n8n-nodes-langchain.lmChatAnthropic',
-					'@n8n/n8n-nodes-langchain.lmChatAzureOpenAi',
-					'@n8n/n8n-nodes-langchain.lmChatAwsBedrock',
-					'@n8n/n8n-nodes-langchain.lmChatMistralCloud',
-					'@n8n/n8n-nodes-langchain.lmChatOllama',
-					'@n8n/n8n-nodes-langchain.lmChatOpenAi',
-					'@n8n/n8n-nodes-langchain.lmChatGroq',
-					'@n8n/n8n-nodes-langchain.lmChatGoogleVertex',
-					'@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
-					'@n8n/n8n-nodes-langchain.lmChatDeepSeek',
-					'@n8n/n8n-nodes-langchain.lmChatOpenRouter',
-					'@n8n/n8n-nodes-langchain.lmChatXAiGrok',
-					'@n8n/n8n-nodes-langchain.code',
-				],
-			},
+			filter: modelFilter,
+		},
+		{
+			type: NodeConnectionTypes.AiLanguageModel,
+			displayName: 'Utility Model (Optional)',
+			required: false,
+			filter: modelFilter,
 		},
 		{
 			type: NodeConnectionTypes.AiMemory,
+			displayName: 'Memory',
 		},
 		{
 			type: NodeConnectionTypes.AiTool,
+			displayName: 'Tool',
 		},
 		{
 			type: NodeConnectionTypes.AiOutputParser,
+			displayName: 'Output Parser',
 		},
 	];
 
@@ -566,7 +579,9 @@ export class BetterAiAgent implements INodeType {
 		(globalThis as any).__BAA_VERBOSE = !!initialOpts.verboseLogs;
 
 		// Get connected components
-		const connectedModel = await getConnectedModel(this);
+		const allConnectedModels = await getConnectedModels(this);
+		const connectedModel = allConnectedModels[0];
+		const connectedUtilityModel = allConnectedModels.length > 1 ? allConnectedModels[1] : undefined;
 		const connectedMemory = await getConnectedMemory(this);
 		const connectedTools = await getConnectedTools(this);
 
@@ -574,9 +589,6 @@ export class BetterAiAgent implements INodeType {
 			throw new NodeOperationError(this.getNode(), 'No language model connected');
 		}
 
-		// Convert n8n model to AI SDK model
-		const aiModel = convertN8nModelToAiSdk(connectedModel);
-		
 		// Convert n8n tools to AI SDK tools
 		const aiTools = convertN8nToolsToAiSdk(connectedTools);
 
@@ -660,120 +672,171 @@ export class BetterAiAgent implements INodeType {
 					}
 				}
 
-				// Generate response with AI SDK - using the pattern from the example
-				// Note: temperature, maxTokens, etc. come from the connected model, not node parameters
-				let stepCount = 0;
-				const genArgs: any = {
-					model: aiModel,
-					maxSteps: options.maxSteps || 5,
-					messages: messages as Array<CoreMessage>,
-					// Provide the system prompt directly to the AI SDK when present
-					...(options.systemMessage ? { system: options.systemMessage } : {}),
-					onStepFinish: ({ text, toolCalls }: any) => {
-						postIntermediate({
-							version: 1,
-							runId,
-							step: stepCount,
-							text,
-							toolCalls,
-							done: false,
-						});
-						stepCount += 1;
-					},
-				};
-
-				// Extract generation settings from the model and pass them explicitly to generateText
-				// This prevents AI SDK from using its own defaults (like temperature: 0)
-				if (aiModel.settings) {
-					if (aiModel.settings.temperature !== undefined) {
-						genArgs.temperature = aiModel.settings.temperature;
-					}
-					if (aiModel.settings.topP !== undefined) {
-						genArgs.topP = aiModel.settings.topP;
-					}
-					if (aiModel.settings.frequencyPenalty !== undefined) {
-						genArgs.frequencyPenalty = aiModel.settings.frequencyPenalty;
-					}
-					if (aiModel.settings.presencePenalty !== undefined) {
-						genArgs.presencePenalty = aiModel.settings.presencePenalty;
-					}
-					if (aiModel.settings.maxTokens !== undefined) {
-						genArgs.maxTokens = aiModel.settings.maxTokens;
-					}
-					if (aiModel.settings.reasoningEffort !== undefined) {
-						genArgs.reasoningEffort = aiModel.settings.reasoningEffort;
-					}
-				}
-
-				if (Object.keys(aiTools).length > 0) {
-					genArgs.tools = aiTools;
-				}
-				
-				// Enable OpenTelemetry tracing for this generation (Langfuse / LangSmith)
-				let telemetrySettings: any;
-				if ((globalThis as any).__BAA_TRACE_PROVIDER === 'langsmith') {
-					telemetrySettings = AISDKExporter.getSettings({
-						runId,
-						metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent' },
-					});
-				} else {
-					telemetrySettings = {
-						isEnabled: true,
-						functionId: runId,
-						metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent' },
-					};
-				}
-
-				genArgs.experimental_telemetry = telemetrySettings;
-				
-				// Validate messages before sending to AI model
-				const validatedMessages = validateMessagesArray(messages);
-				genArgs.messages = validatedMessages;
-
-				// Generate response - let n8n handle any errors and retries
 				let result: any;
-				try {
-					result = await generateText(genArgs);
-				} catch (err: any) {
-					// Post error to webhook if configured
-					postIntermediate({
-						version: 1,
-						runId,
-						step: stepCount,
-						error: (err as Error).message,
-						done: true,
-						failed: true,
-					});
+
+				if (connectedUtilityModel) {
+					// TWO-STAGE: Use utility model for tool calls, then main model for final response.
+					console.log('🚀 Utility model connected. Starting two-stage generation.');
+
+					const mainAiModel = convertN8nModelToAiSdk(connectedModel);
+					const utilityAiModel = convertN8nModelToAiSdk(connectedUtilityModel);
+
+					// --- Stage 1: Tool loop with Utility Model ---
+					let stepCount = 0;
+					const utilityGenArgs: any = {
+						model: utilityAiModel,
+						maxSteps: options.maxSteps || 5,
+						messages: messages as Array<CoreMessage>,
+						...(options.systemMessage ? { system: options.systemMessage } : {}),
+						onStepFinish: ({ text, toolCalls }: any) => {
+							postIntermediate({ version: 1, runId, step: stepCount, text, toolCalls, done: false, model: 'utility' });
+							stepCount += 1;
+						},
+					};
+
+					if (utilityAiModel.settings) {
+						if (utilityAiModel.settings.temperature !== undefined) utilityGenArgs.temperature = utilityAiModel.settings.temperature;
+						if (utilityAiModel.settings.topP !== undefined) utilityGenArgs.topP = utilityAiModel.settings.topP;
+						if (utilityAiModel.settings.frequencyPenalty !== undefined) utilityGenArgs.frequencyPenalty = utilityAiModel.settings.frequencyPenalty;
+						if (utilityAiModel.settings.presencePenalty !== undefined) utilityGenArgs.presencePenalty = utilityAiModel.settings.presencePenalty;
+						if (utilityAiModel.settings.maxTokens !== undefined) utilityGenArgs.maxTokens = utilityAiModel.settings.maxTokens;
+						if (utilityAiModel.settings.reasoningEffort !== undefined) utilityGenArgs.reasoningEffort = utilityAiModel.settings.reasoningEffort;
+					}
+
+					if (Object.keys(aiTools).length > 0) {
+						utilityGenArgs.tools = aiTools;
+					}
+
+					let telemetrySettings: any;
+					if ((globalThis as any).__BAA_TRACE_PROVIDER === 'langsmith') {
+						telemetrySettings = AISDKExporter.getSettings({ runId, metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent', model: 'utility' } });
+					} else {
+						telemetrySettings = { isEnabled: true, functionId: `${runId}-utility`, metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent', model: 'utility' } };
+					}
+					utilityGenArgs.experimental_telemetry = telemetrySettings;
+					utilityGenArgs.messages = validateMessagesArray(messages);
+
+					const toolLoopResult = await generateText(utilityGenArgs);
+
+					// Manually reconstruct history for the main model
+					const finalMessages: CoreMessage[] = [...messages]; // Start with the messages sent to the utility model
+					if (toolLoopResult.toolCalls && toolLoopResult.toolCalls.length > 0) {
+						finalMessages.push({ role: 'assistant', content: toolLoopResult.toolCalls });
+					}
+					if (toolLoopResult.toolResults && toolLoopResult.toolResults.length > 0) {
+						finalMessages.push({ role: 'tool', content: toolLoopResult.toolResults });
+					}
+					// Add the utility model's final text to the history for context
+					if (toolLoopResult.text) {
+						finalMessages.push({ role: 'assistant', content: toolLoopResult.text });
+					}
+
+					// --- Stage 2: Final response with Main Model ---
+					console.log('✅ Tool loop finished. Generating final response with main model.');
+					const finalGenArgs: any = {
+						model: mainAiModel,
+						messages: finalMessages, // Use the manually constructed full history
+						...(options.systemMessage ? { system: options.systemMessage } : {}),
+						// NO TOOLS for the final response
+					};
+
+					if (mainAiModel.settings) {
+						if (mainAiModel.settings.temperature !== undefined) finalGenArgs.temperature = mainAiModel.settings.temperature;
+						if (mainAiModel.settings.topP !== undefined) finalGenArgs.topP = mainAiModel.settings.topP;
+						if (mainAiModel.settings.frequencyPenalty !== undefined) finalGenArgs.frequencyPenalty = mainAiModel.settings.frequencyPenalty;
+						if (mainAiModel.settings.presencePenalty !== undefined) finalGenArgs.presencePenalty = mainAiModel.settings.presencePenalty;
+						if (mainAiModel.settings.maxTokens !== undefined) finalGenArgs.maxTokens = mainAiModel.settings.maxTokens;
+						if (mainAiModel.settings.reasoningEffort !== undefined) finalGenArgs.reasoningEffort = mainAiModel.settings.reasoningEffort;
+					}
 					
-					// Throw error for n8n to handle (including retries, error workflows, etc.)
-					throw new NodeOperationError(this.getNode(), `AI model generation failed: ${(err as Error).message}`, {
-						itemIndex: 0,
-						runIndex: 0,
-					});
+					if ((globalThis as any).__BAA_TRACE_PROVIDER === 'langsmith') {
+						telemetrySettings = AISDKExporter.getSettings({ runId, metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent', model: 'main' } });
+					} else {
+						telemetrySettings = { isEnabled: true, functionId: `${runId}-main`, metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent', model: 'main' } };
+					}
+					finalGenArgs.experimental_telemetry = telemetrySettings;
+
+					const finalResult = await generateText(finalGenArgs);
+
+					// Combine results for output and memory
+					result = {
+						...finalResult,
+						steps: toolLoopResult.steps, // Keep the steps from the utility model's run
+					};
+				} else {
+					// SINGLE-STAGE: Use only the main model for the entire generation
+					const aiModel = convertN8nModelToAiSdk(connectedModel);
+					
+					let stepCount = 0;
+					const genArgs: any = {
+						model: aiModel,
+						maxSteps: options.maxSteps || 5,
+						messages: messages as Array<CoreMessage>,
+						...(options.systemMessage ? { system: options.systemMessage } : {}),
+						onStepFinish: ({ text, toolCalls }: any) => {
+							postIntermediate({
+								version: 1,
+								runId,
+								step: stepCount,
+								text,
+								toolCalls,
+								done: false,
+							});
+							stepCount += 1;
+						},
+					};
+
+					if (aiModel.settings) {
+						if (aiModel.settings.temperature !== undefined) genArgs.temperature = aiModel.settings.temperature;
+						if (aiModel.settings.topP !== undefined) genArgs.topP = aiModel.settings.topP;
+						if (aiModel.settings.frequencyPenalty !== undefined) genArgs.frequencyPenalty = aiModel.settings.frequencyPenalty;
+						if (aiModel.settings.presencePenalty !== undefined) genArgs.presencePenalty = aiModel.settings.presencePenalty;
+						if (aiModel.settings.maxTokens !== undefined) genArgs.maxTokens = aiModel.settings.maxTokens;
+						if (aiModel.settings.reasoningEffort !== undefined) genArgs.reasoningEffort = aiModel.settings.reasoningEffort;
+					}
+
+					if (Object.keys(aiTools).length > 0) {
+						genArgs.tools = aiTools;
+					}
+					
+					let telemetrySettings: any;
+					if ((globalThis as any).__BAA_TRACE_PROVIDER === 'langsmith') {
+						telemetrySettings = AISDKExporter.getSettings({
+							runId,
+							metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent' },
+						});
+					} else {
+						telemetrySettings = {
+							isEnabled: true,
+							functionId: runId,
+							metadata: { n8nNodeName: this.getNode().name ?? 'BetterAiAgent' },
+						};
+					}
+
+					genArgs.experimental_telemetry = telemetrySettings;
+					genArgs.messages = validateMessagesArray(messages);
+
+					try {
+						result = await generateText(genArgs);
+					} catch (err: any) {
+						postIntermediate({ version: 1, runId, step: stepCount, error: (err as Error).message, done: true, failed: true });
+						throw new NodeOperationError(this.getNode(), `AI model generation failed: ${(err as Error).message}`, { itemIndex: 0, runIndex: 0 });
+					}
 				}
 
 				// Convert result steps to ChatMessage objects & persist
 				if (memoryAdapter) {
 					try {
-						// Reconstruct the full exchange to be saved
 						const messagesToSave: CoreMessage[] = [{ role: 'user', content: input }];
 						
-						// Aggregate toolCalls and toolResults (SDK may expose them only inside steps)
-						const aggregatedToolCalls = (
-							(result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : []) as any[]
-						).concat(
-							(result.steps || [])
-								.flatMap((s: any) => (s.toolCalls ? s.toolCalls : []))
+						const aggregatedToolCalls = ((result.toolCalls && result.toolCalls.length > 0 ? result.toolCalls : []) as any[]).concat(
+							(result.steps || []).flatMap((s: any) => (s.toolCalls ? s.toolCalls : []))
 						);
 
-						const aggregatedToolResults = (
-							(result.toolResults && result.toolResults.length > 0 ? result.toolResults : []) as any[]
-						).concat(
-							(result.steps || [])
-								.flatMap((s: any) => (s.toolResults ? s.toolResults : []))
+						const aggregatedToolResults = ((result.toolResults && result.toolResults.length > 0 ? result.toolResults : []) as any[]).concat(
+							(result.steps || []).flatMap((s: any) => (s.toolResults ? s.toolResults : []))
 						);
 
-						// If there were tool calls, save them as separate assistant message
 						if (aggregatedToolCalls.length > 0) {
 							messagesToSave.push({
 								role: 'assistant',
@@ -786,25 +849,20 @@ export class BetterAiAgent implements INodeType {
 							});
 						}
 
-						// If there were tool results, save them
 						if (aggregatedToolResults.length > 0) {
 							messagesToSave.push({
 								role: 'tool',
 								content: aggregatedToolResults.map((toolResult: any) => {
-									// Build tool-result part
 									const normalize = (): any => {
 										const raw = toolResult.result ?? toolResult.data ?? toolResult.output ?? '';
 										if (typeof raw === 'string') {
 											const trimmed = raw.trim();
 											if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-												try {
-													return JSON.parse(trimmed);
-												} catch {}
+												try { return JSON.parse(trimmed); } catch {}
 											}
 										}
 										return raw;
 									};
-
 									return {
 										type: 'tool-result',
 										toolCallId: toolResult.toolCallId || toolResult.id || toolResult.callId,
@@ -815,7 +873,6 @@ export class BetterAiAgent implements INodeType {
 							});
 						}
 
-						// If there's a final text response, save it as separate assistant message
 						if (result.text) {
 							messagesToSave.push({ role: 'assistant', content: result.text });
 						}
@@ -824,8 +881,6 @@ export class BetterAiAgent implements INodeType {
 						console.log(`💾 Saved ${messagesToSave.length} messages (including new turn).`);
 					} catch (err) {
 						console.warn('❌ Failed to save conversation to memory:', err);
-						// Note: We don't throw here as the AI generation was successful
-						// Memory save failures are not critical to the node execution
 					}
 				}
 
@@ -834,7 +889,6 @@ export class BetterAiAgent implements INodeType {
 					json: {
 						output: result.text,
 						steps: result.steps || [],
-						// Include debug information
 						totalSteps: result.steps?.length || 0,
 					},
 				});

@@ -20,7 +20,7 @@ import { z } from 'zod';
 import {
 	getConnectedTools,
 	getConnectedMemory,
-	getConnectedModel,
+	getConnectedModels,
 	toolDescription,
 } from './utils';
 import { ChatArrayMemory } from './utils/chatArrayMemory';
@@ -556,7 +556,8 @@ export class BetterAiAgentTool implements INodeType {
 				schema: toolSchema,
 				invoke: async (parameters: { query: string }) => {
 					// Get connected components
-					const connectedModel = await getConnectedModel(this as any);
+					const allConnectedModels = await getConnectedModels(this as any);
+					const connectedModel = allConnectedModels[0];
 					const connectedMemory = await getConnectedMemory(this as any);
 					const connectedTools = await getConnectedTools(this as any);
 
